@@ -1,12 +1,14 @@
-import { ChevronDown, ChevronRight, MapPin, Package, Pencil, Plus, Trash2, Users, Wallet } from 'lucide-react'
+import { ChevronDown, ChevronRight, CircleHelp, MapPin, Package, Pencil, Plus, Search, Trash2, Users, Wallet, X } from 'lucide-react'
 import { Fragment, useMemo, useState } from 'react'
 
 import type { CampaignRuleSummary } from '@core/api/contracts'
+import { buildPublicationBandWithCards, parseCardInstallmentCaps, stripPublicationBandMetadata } from '@core/domain/publication-band'
 import { Badge } from '@core/ui/primitives/badge'
 import { Button } from '@core/ui/primitives/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@core/ui/primitives/card'
 import { Dialog } from '@core/ui/primitives/dialog'
 import { Input } from '@core/ui/primitives/input'
+import { MultiSelect } from '@core/ui/primitives/multi-select'
 import { Select } from '@core/ui/primitives/select'
 import {
   Table,
@@ -26,41 +28,154 @@ const paymentFamilyLabel: Record<string, string> = {
   debit_card: 'Tarjeta de debito',
   bank_transfer: 'Transferencia',
   cash: 'Efectivo',
+  'naranja-x': 'Naranja X',
+  sidecreer: 'Sidecreer',
+  bbva: 'BBVA',
+  macro: 'Macro',
   none: 'No aplicable',
 }
 
-const paymentFamilyOptions = Object.entries(paymentFamilyLabel)
+const paymentFamilyOptions = [
+  { value: 'all', label: paymentFamilyLabel.all },
+  { value: 'credit_card', label: paymentFamilyLabel.credit_card },
+  { value: 'debit_card', label: paymentFamilyLabel.debit_card },
+  { value: 'bank_transfer', label: paymentFamilyLabel.bank_transfer },
+  { value: 'cash', label: paymentFamilyLabel.cash },
+]
+
+const cardOptions = [
+  { value: 'naranja-x', label: paymentFamilyLabel['naranja-x'] },
+  { value: 'sidecreer', label: paymentFamilyLabel.sidecreer },
+  { value: 'bbva', label: paymentFamilyLabel.bbva },
+  { value: 'macro', label: paymentFamilyLabel.macro },
+]
+
+const customerSegmentOptions = [
+  { value: 'external', label: 'Externo' },
+  { value: 'affiliate', label: 'Afiliado' },
+]
+
+type CustomerSegment = 'external' | 'affiliate'
 
 type RuleDraft = {
-  sku: string
-  customerSegment: 'external' | 'affiliate'
-  paymentFamily: string
-  offerType: string
-  publicationBand: string
+  skus: string[]
+  customerSegments: CustomerSegment[]
+  paymentFamilies: string[]
+  selectedCards: string[]
+  cardInstallmentCaps: Record<string, string>
   cashDiscountPercent: string
   affiliateExtraDiscountPercent: string
 }
 
 const EMPTY_RULE_DRAFT: RuleDraft = {
-  sku: '',
-  customerSegment: 'external',
-  paymentFamily: 'all',
-  offerType: '',
-  publicationBand: '',
+  skus: [],
+  customerSegments: ['external'],
+  paymentFamilies: ['all'],
+  selectedCards: [],
+  cardInstallmentCaps: {
+    'naranja-x': '6',
+    sidecreer: '6',
+    bbva: '6',
+    macro: '6',
+  },
   cashDiscountPercent: '0',
   affiliateExtraDiscountPercent: '0',
 }
 
 function ruleToDraft(rule: CampaignRuleSummary): RuleDraft {
+  const rawPaymentFamilies = rule.paymentFamily
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+  const selectedCards = rawPaymentFamilies.filter((value) => cardOptions.some((card) => card.value === value))
+  const normalizedPaymentFamilies = rawPaymentFamilies
+    .filter((value) => !cardOptions.some((card) => card.value === value))
+
+  if (selectedCards.length > 0 && !normalizedPaymentFamilies.includes('credit_card')) {
+    normalizedPaymentFamilies.push('credit_card')
+  }
+
+  if (normalizedPaymentFamilies.length === 0) {
+    normalizedPaymentFamilies.push('all')
+  }
+
+  const cardInstallmentCaps = parseCardInstallmentCaps(rule.publicationBand)
+
   return {
-    sku: rule.sku,
-    customerSegment: rule.customerSegment,
-    paymentFamily: rule.paymentFamily,
-    offerType: rule.offerType,
-    publicationBand: rule.publicationBand,
+    skus: [rule.sku],
+    customerSegments:
+      rule.customerSegment === 'all'
+        ? ['external', 'affiliate']
+        : [rule.customerSegment],
+    paymentFamilies: normalizedPaymentFamilies,
+    selectedCards,
+    cardInstallmentCaps: {
+      'naranja-x': String(cardInstallmentCaps['naranja-x'] ?? 6),
+      sidecreer: String(cardInstallmentCaps.sidecreer ?? 6),
+      bbva: String(cardInstallmentCaps.bbva ?? 6),
+      macro: String(cardInstallmentCaps.macro ?? 6),
+    },
     cashDiscountPercent: String(Math.round(rule.cashDiscountPercent * 100)),
     affiliateExtraDiscountPercent: String(Math.round(rule.affiliateExtraDiscountPercent * 100)),
   }
+}
+
+function logoDataUri(short: string, bg: string, fg: string): string {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="40" viewBox="0 0 64 40"><rect width="64" height="40" rx="8" fill="${bg}"/><text x="32" y="24" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="700" fill="${fg}">${short}</text></svg>`
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`
+}
+
+const cardVisualMeta: Record<string, { short: string; bg: string; fg: string }> = {
+  'naranja-x': { short: 'NX', bg: '#f97316', fg: '#ffffff' },
+  sidecreer: { short: 'SC', bg: '#2563eb', fg: '#ffffff' },
+  bbva: { short: 'BB', bg: '#1d4ed8', fg: '#ffffff' },
+  macro: { short: 'MA', bg: '#dc2626', fg: '#ffffff' },
+}
+
+function computePublicationBand(draft: RuleDraft): string {
+  if (draft.paymentFamilies.includes('credit_card') && draft.selectedCards.length > 0) {
+    const maxCap = Math.max(
+      ...draft.selectedCards.map((cardId) => Number.parseInt(draft.cardInstallmentCaps[cardId] ?? '1', 10) || 1),
+    )
+    return `Hasta ${maxCap} cuotas sin interes`
+  }
+
+  if (draft.paymentFamilies.includes('all')) {
+    return 'Condiciones generales'
+  }
+
+  if (draft.paymentFamilies.length > 0) {
+    return 'Condiciones por medio de pago'
+  }
+
+  return 'Sin promo'
+}
+
+function toggleSelection(currentValues: string[], value: string): string[] {
+  return currentValues.includes(value)
+    ? currentValues.filter((currentValue) => currentValue !== value)
+    : [...currentValues, value]
+}
+
+function formatRuleCustomerSegment(segment: CampaignRuleSummary['customerSegment']): string {
+  if (segment === 'all') {
+    return 'Externo + Afiliado'
+  }
+
+  return segment === 'affiliate' ? 'Afiliado' : 'Externo'
+}
+
+function formatRulePaymentFamily(rule: CampaignRuleSummary): string {
+  const families = rule.paymentFamily
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (families.length === 0 || families.includes('all')) {
+    return paymentFamilyLabel.all
+  }
+
+  return families.map((family) => paymentFamilyLabel[family] ?? family).join(', ')
 }
 
 function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
@@ -68,27 +183,77 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
     useCampaignRules(campaignId)
   const { data: catalogData } = useCatalogProducts({})
   const rules = data?.rules ?? []
-  const products = catalogData?.items ?? []
+  const products = useMemo(() => catalogData?.items ?? [], [catalogData?.items])
 
   const [ruleModalMode, setRuleModalMode] = useState<'create' | 'edit' | null>(null)
   const [ruleDraft, setRuleDraft] = useState<RuleDraft>(EMPTY_RULE_DRAFT)
+  const [productSearchTerm, setProductSearchTerm] = useState('')
   const [ruleFormError, setRuleFormError] = useState<string | null>(null)
   const [removingSku, setRemovingSku] = useState<string | null>(null)
 
+  const filteredProducts = useMemo(() => {
+    const query = productSearchTerm.trim().toLowerCase()
+    if (!query) {
+      return products.slice(0, 24)
+    }
+
+    return products
+      .filter((product) =>
+        product.sku.toLowerCase().includes(query) ||
+        product.description.toLowerCase().includes(query),
+      )
+      .slice(0, 24)
+  }, [productSearchTerm, products])
+
   function updateRuleDraft(patch: Partial<RuleDraft>) {
     setRuleDraft((current) => ({ ...current, ...patch }))
+  }
+
+  function toggleProductSku(sku: string) {
+    if (ruleModalMode === 'edit') {
+      return
+    }
+
+    updateRuleDraft({ skus: toggleSelection(ruleDraft.skus, sku) })
+  }
+
+  function handleCustomerSegmentsChange(values: string[]) {
+    const selected = values.filter((value) => value === 'external' || value === 'affiliate') as CustomerSegment[]
+    updateRuleDraft({ customerSegments: selected })
+  }
+
+  function handlePaymentFamiliesChange(values: string[]) {
+    if (values.includes('all')) {
+      updateRuleDraft({
+        paymentFamilies: ['all'],
+        selectedCards: [],
+      })
+      return
+    }
+
+    const withoutAll = values.filter((value) => value !== 'all')
+    updateRuleDraft({
+      paymentFamilies: withoutAll,
+      selectedCards: withoutAll.includes('credit_card') ? ruleDraft.selectedCards : [],
+    })
+  }
+
+  function toggleCard(cardId: string) {
+    updateRuleDraft({ selectedCards: toggleSelection(ruleDraft.selectedCards, cardId) })
   }
 
   function openAddProduct() {
     setRuleModalMode('create')
     setRuleFormError(null)
     setRuleDraft(EMPTY_RULE_DRAFT)
+    setProductSearchTerm('')
   }
 
   function openEditRule(rule: CampaignRuleSummary) {
     setRuleModalMode('edit')
     setRuleFormError(null)
     setRuleDraft(ruleToDraft(rule))
+    setProductSearchTerm('')
   }
 
   function closeRuleModal() {
@@ -96,31 +261,72 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
       return
     }
     setRuleModalMode(null)
+    setProductSearchTerm('')
   }
 
   async function handleSubmitRule() {
-    if (!ruleDraft.sku) {
-      setRuleFormError('Selecciona un producto.')
+    if (ruleDraft.skus.length === 0) {
+      setRuleFormError('Selecciona al menos un producto.')
       return
     }
 
-    if (!ruleDraft.offerType.trim()) {
-      setRuleFormError('Completa el tipo de oferta.')
+    if (ruleDraft.customerSegments.length === 0) {
+      setRuleFormError('Selecciona al menos un tipo de cliente.')
+      return
+    }
+
+    if (ruleDraft.paymentFamilies.length === 0) {
+      setRuleFormError('Selecciona al menos un medio de pago o "Cualquier medio".')
+      return
+    }
+
+    if (ruleDraft.paymentFamilies.includes('credit_card') && ruleDraft.selectedCards.length === 0) {
+      setRuleFormError('Si eliges tarjeta de credito, selecciona al menos una tarjeta.')
       return
     }
 
     try {
-      await upsertRule({
-        campaignId,
-        sku: ruleDraft.sku,
-        offerType: ruleDraft.offerType.trim(),
-        publicationBand: ruleDraft.publicationBand.trim() || 'Sin promo',
-        customerSegment: ruleDraft.customerSegment,
-        paymentFamily: ruleDraft.paymentFamily,
-        cashDiscountPercent: Math.max(0, Number(ruleDraft.cashDiscountPercent) || 0) / 100,
-        affiliateExtraDiscountPercent:
-          Math.max(0, Number(ruleDraft.affiliateExtraDiscountPercent) || 0) / 100,
-      })
+      const selectedPaymentFamilies = ruleDraft.paymentFamilies.includes('all')
+        ? ['all']
+        : ruleDraft.paymentFamilies
+
+      const nonCardFamilies = selectedPaymentFamilies.filter((family) => family !== 'credit_card')
+      const effectivePaymentFamilies = selectedPaymentFamilies.includes('credit_card')
+        ? [...nonCardFamilies, ...ruleDraft.selectedCards]
+        : nonCardFamilies
+
+      const normalizedPaymentFamilies = Array.from(new Set(effectivePaymentFamilies))
+
+      const cardInstallmentCaps = ruleDraft.selectedCards.reduce<Record<string, number>>((acc, cardId) => {
+        const parsedCap = Number.parseInt(ruleDraft.cardInstallmentCaps[cardId] ?? '0', 10)
+        if (Number.isFinite(parsedCap) && parsedCap > 0) {
+          acc[cardId] = parsedCap
+        }
+        return acc
+      }, {})
+
+      const publicationBand = buildPublicationBandWithCards(
+        computePublicationBand(ruleDraft),
+        cardInstallmentCaps,
+      )
+
+      const customerSegment =
+        ruleDraft.customerSegments.length === 2 ? 'all' : ruleDraft.customerSegments[0]
+
+      for (const sku of ruleDraft.skus) {
+        await upsertRule({
+          campaignId,
+          sku,
+          offerType: 'Regla comercial',
+          publicationBand,
+          customerSegment,
+          paymentFamily: normalizedPaymentFamilies.join(','),
+          cashDiscountPercent: Math.max(0, Number(ruleDraft.cashDiscountPercent) || 0) / 100,
+          affiliateExtraDiscountPercent:
+            Math.max(0, Number(ruleDraft.affiliateExtraDiscountPercent) || 0) / 100,
+        })
+      }
+
       setRuleModalMode(null)
     } catch (mutationError) {
       setRuleFormError(
@@ -139,6 +345,9 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
   }
 
   const isEditingExistingSku = ruleModalMode === 'edit'
+  const isCreditCardSelected =
+    !ruleDraft.paymentFamilies.includes('all') &&
+    (ruleDraft.paymentFamilies.includes('credit_card') || ruleDraft.selectedCards.length > 0)
 
   return (
     <>
@@ -167,13 +376,13 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
               <div className="overflow-x-auto rounded-lg border border-[var(--color-surface-200)] bg-white">
                 <table className="w-full table-fixed text-sm">
                   <colgroup>
-                    <col className="w-[28%]" />
+                    <col className="w-[31%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[19%]" />
+                    <col className="w-[13%]" />
                     <col className="w-[11%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[15%]" />
-                    <col className="w-[10%]" />
-                    <col className="w-[10%]" />
                     <col className="w-[11%]" />
+                    <col className="w-[12%]" />
                   </colgroup>
                   <thead>
                     <tr className="border-b border-[var(--color-surface-200)] text-left text-xs uppercase tracking-wide text-[var(--color-ink-600)]">
@@ -190,7 +399,7 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
                           Medio de pago
                         </span>
                       </th>
-                      <th className="whitespace-nowrap px-3 py-2 align-middle">Tipo de oferta</th>
+                      <th className="whitespace-nowrap px-3 py-2 align-middle">Banda</th>
                       <th className="whitespace-nowrap px-3 py-2 text-right align-middle">Contado</th>
                       <th className="whitespace-nowrap px-3 py-2 text-right align-middle">Afiliado</th>
                       <th className="whitespace-nowrap px-3 py-2 text-right align-middle">Acciones</th>
@@ -206,14 +415,16 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
                           <p className="text-xs text-[var(--color-ink-600)]">SKU {rule.sku}</p>
                         </td>
                         <td className="px-3 py-2 align-middle">
-                          <Badge variant={rule.customerSegment === 'affiliate' ? 'promo' : 'neutral'}>
-                            {rule.customerSegment === 'affiliate' ? 'Afiliado' : 'Externo'}
+                          <Badge variant={rule.customerSegment === 'all' ? 'warning' : 'neutral'}>
+                            {formatRuleCustomerSegment(rule.customerSegment)}
                           </Badge>
                         </td>
                         <td className="px-3 py-2 align-middle text-[var(--color-ink-700)]">
-                          {paymentFamilyLabel[rule.paymentFamily] ?? rule.paymentFamily}
+                          {formatRulePaymentFamily(rule)}
                         </td>
-                        <td className="px-3 py-2 align-middle text-[var(--color-ink-700)]">{rule.offerType}</td>
+                        <td className="px-3 py-2 align-middle text-[var(--color-ink-700)]">
+                          {stripPublicationBandMetadata(rule.publicationBand)}
+                        </td>
                         <td className="px-3 py-2 text-right align-middle text-[var(--color-ink-700)]">
                           {rule.cashDiscountPercent > 0 ? `${Math.round(rule.cashDiscountPercent * 100)}%` : '—'}
                         </td>
@@ -269,6 +480,8 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
         title={ruleModalMode === 'create' ? 'Agregar producto a la campaña' : 'Editar regla de producto'}
         description="Define el cruce Producto x Medio de pago x Cliente para esta campaña."
         onClose={closeRuleModal}
+        contentClassName="max-w-5xl"
+        bodyClassName="max-h-[72vh] overflow-y-auto pr-1"
         footer={
           <Button
             variant="primary"
@@ -281,89 +494,215 @@ function CampaignRulesPanel({ campaignId }: { campaignId: string }) {
           </Button>
         }
       >
-        <div className="grid gap-3 md:grid-cols-2">
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)] md:col-span-2">
-            Producto (SKU)
-            <Select
-              value={ruleDraft.sku}
-              disabled={isEditingExistingSku}
-              onChange={(event) => updateRuleDraft({ sku: event.target.value })}
-            >
-              <option value="">Selecciona un producto...</option>
-              {products.map((product) => (
-                <option key={product.sku} value={product.sku}>
-                  {product.sku} - {product.description}
-                </option>
-              ))}
-            </Select>
-          </label>
+        <div className="space-y-5">
+          <div className="grid gap-4 lg:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]">
+            <section className="space-y-3 rounded-xl border border-[var(--color-surface-300)] bg-[var(--color-surface-50)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-700)]">
+                Productos de la promocion
+              </p>
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Cliente
-            <Select
-              value={ruleDraft.customerSegment}
-              onChange={(event) =>
-                updateRuleDraft({ customerSegment: event.target.value as RuleDraft['customerSegment'] })
-              }
-            >
-              <option value="external">Externo</option>
-              <option value="affiliate">Afiliado</option>
-            </Select>
-          </label>
+              <label className="space-y-1 text-sm text-[var(--color-ink-700)]">
+                <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                  Buscar por SKU o descripcion
+                </span>
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-[var(--color-ink-500)]" />
+                  <Input
+                    value={productSearchTerm}
+                    onChange={(event) => setProductSearchTerm(event.target.value)}
+                    placeholder="Ej: 1004 o Smart TV"
+                    disabled={isEditingExistingSku}
+                    className="pl-8"
+                  />
+                </div>
+              </label>
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Medio de pago
-            <Select
-              value={ruleDraft.paymentFamily}
-              onChange={(event) => updateRuleDraft({ paymentFamily: event.target.value })}
-            >
-              {paymentFamilyOptions.map(([value, label]) => (
-                <option key={value} value={value}>
-                  {label}
-                </option>
-              ))}
-            </Select>
-          </label>
+              <div className="max-h-60 space-y-1 overflow-auto rounded-lg border border-[var(--color-surface-300)] bg-white p-2">
+                {filteredProducts.map((product) => {
+                  const isSelected = ruleDraft.skus.includes(product.sku)
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Tipo de oferta
-            <Input
-              placeholder="Sin interes / Flash / Regular..."
-              value={ruleDraft.offerType}
-              onChange={(event) => updateRuleDraft({ offerType: event.target.value })}
-            />
-          </label>
+                  return (
+                    <div
+                      key={product.sku}
+                      className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 ${
+                        isSelected ? 'bg-[var(--color-brand-50)]' : 'hover:bg-[var(--color-surface-100)]'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-[var(--color-ink-900)]">{product.description}</p>
+                        <p className="text-xs text-[var(--color-ink-600)]">SKU {product.sku}</p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant={isSelected ? 'ghost' : 'secondary'}
+                        disabled={isEditingExistingSku}
+                        onClick={() => toggleProductSku(product.sku)}
+                      >
+                        {isSelected ? 'Quitar' : 'Agregar'}
+                      </Button>
+                    </div>
+                  )
+                })}
+              </div>
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Banda de publicacion
-            <Input
-              placeholder="Hasta 12 sin interes"
-              value={ruleDraft.publicationBand}
-              onChange={(event) => updateRuleDraft({ publicationBand: event.target.value })}
-            />
-          </label>
+              <div className="flex flex-wrap gap-2">
+                {ruleDraft.skus.length === 0 ? (
+                  <span className="text-xs text-[var(--color-ink-600)]">Sin productos seleccionados.</span>
+                ) : null}
+                {ruleDraft.skus.map((sku) => {
+                  const product = products.find((item) => item.sku === sku)
+                  if (!product) {
+                    return null
+                  }
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Descuento contado (%)
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              value={ruleDraft.cashDiscountPercent}
-              onChange={(event) => updateRuleDraft({ cashDiscountPercent: event.target.value })}
-            />
-          </label>
+                  return (
+                    <span
+                      key={sku}
+                      className="inline-flex items-center gap-1 rounded-full border border-[var(--color-brand-200)] bg-[var(--color-brand-50)] px-2.5 py-1 text-xs text-[var(--color-brand-700)]"
+                    >
+                      {sku}
+                      {!isEditingExistingSku ? (
+                        <button
+                          type="button"
+                          aria-label={`Quitar SKU ${sku}`}
+                          onClick={() => toggleProductSku(sku)}
+                          className="rounded p-0.5 hover:bg-[var(--color-brand-100)]"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      ) : null}
+                    </span>
+                  )
+                })}
+              </div>
+            </section>
 
-          <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-            Descuento adicional afiliados (%)
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              value={ruleDraft.affiliateExtraDiscountPercent}
-              onChange={(event) => updateRuleDraft({ affiliateExtraDiscountPercent: event.target.value })}
-            />
-          </label>
+            <section className="space-y-3 rounded-xl border border-[var(--color-surface-300)] bg-white p-3">
+              <label className="space-y-1.5 text-sm text-[var(--color-ink-700)]">
+                <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                  Cliente
+                </span>
+                <MultiSelect
+                  options={customerSegmentOptions}
+                  value={ruleDraft.customerSegments}
+                  onChange={handleCustomerSegmentsChange}
+                  placeholder="Seleccionar clientes"
+                />
+              </label>
+
+              <label className="space-y-1.5 text-sm text-[var(--color-ink-700)]">
+                <span className="text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                  Medios de pago
+                </span>
+                <MultiSelect
+                  options={paymentFamilyOptions}
+                  value={ruleDraft.paymentFamilies}
+                  onChange={handlePaymentFamiliesChange}
+                  placeholder="Seleccionar medios"
+                />
+              </label>
+
+              <div className="rounded-lg border border-[var(--color-brand-200)] bg-[var(--color-brand-50)] p-2.5">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-brand-700)]">
+                  Banda de publicacion generada
+                </p>
+                <p className="mt-1 text-sm text-[var(--color-ink-800)]">{computePublicationBand(ruleDraft)}</p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                  Descuento contado (%)
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={ruleDraft.cashDiscountPercent}
+                    onChange={(event) => updateRuleDraft({ cashDiscountPercent: event.target.value })}
+                  />
+                </label>
+
+                <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                  Descuento afiliados (%)
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={ruleDraft.affiliateExtraDiscountPercent}
+                    onChange={(event) => updateRuleDraft({ affiliateExtraDiscountPercent: event.target.value })}
+                  />
+                </label>
+              </div>
+            </section>
+          </div>
+
+          {isCreditCardSelected ? (
+            <section className="space-y-2 rounded-xl border border-[var(--color-brand-200)] bg-[var(--color-brand-50)] p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-brand-700)]">
+                Tarjetas y cuotas por tarjeta
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                {cardOptions.map((card) => {
+                  const isSelected = ruleDraft.selectedCards.includes(card.value)
+                  const visual = cardVisualMeta[card.value]
+
+                  return (
+                    <article
+                      key={card.value}
+                      className={`rounded-lg border p-2 ${
+                        isSelected
+                          ? 'border-[var(--color-brand-300)] bg-white shadow-sm'
+                          : 'border-[var(--color-surface-300)] bg-[var(--color-surface-50)]'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => toggleCard(card.value)}
+                        className="flex w-full items-center gap-2 rounded-md text-left"
+                      >
+                        <img
+                          src={logoDataUri(visual.short, visual.bg, visual.fg)}
+                          alt={`Tarjeta ${card.label}`}
+                          className="h-6 w-10 rounded object-cover"
+                        />
+                        <span className="flex-1 text-sm font-medium text-[var(--color-ink-900)]">{card.label}</span>
+                        <span
+                          className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            isSelected
+                              ? 'bg-[var(--color-brand-100)] text-[var(--color-brand-700)]'
+                              : 'bg-[var(--color-surface-200)] text-[var(--color-ink-600)]'
+                          }`}
+                        >
+                          {isSelected ? 'Activa' : 'Inactiva'}
+                        </span>
+                      </button>
+
+                      <label className="mt-2 block space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
+                        Cuotas maximas
+                        <Select
+                          value={ruleDraft.cardInstallmentCaps[card.value] ?? '6'}
+                          disabled={!isSelected}
+                          onChange={(event) =>
+                            updateRuleDraft({
+                              cardInstallmentCaps: {
+                                ...ruleDraft.cardInstallmentCaps,
+                                [card.value]: event.target.value,
+                              },
+                            })
+                          }
+                        >
+                          {Array.from({ length: 18 }, (_, index) => index + 1).map((installments) => (
+                            <option key={installments} value={installments}>
+                              Hasta {installments}
+                            </option>
+                          ))}
+                        </Select>
+                      </label>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
+          ) : null}
         </div>
 
         {ruleFormError ? (
@@ -485,9 +824,9 @@ function CampaignForm({ draft, onChange }: CampaignFormProps) {
       </label>
 
       <label className="space-y-1 text-xs font-medium uppercase tracking-wide text-[var(--color-ink-600)]">
-        Contexto de publicacion
+        Descripcion
         <Input
-          placeholder="Marketplace / Sucursal / Web"
+          placeholder="Describe alcance y objetivo comercial"
           value={draft.publicationContext}
           onChange={(event) => onChange({ publicationContext: event.target.value })}
         />
@@ -543,7 +882,7 @@ function CampaignForm({ draft, onChange }: CampaignFormProps) {
 
 function validateDraft(draft: CampaignDraft) {
   if (!draft.name.trim() || !draft.publicationContext.trim()) {
-    return 'Completa nombre y contexto de publicacion.'
+    return 'Completa nombre y descripcion.'
   }
 
   if (!draft.startsAt || !draft.endsAt) {
@@ -711,7 +1050,7 @@ export function AdminCampaignsPage() {
               <Input
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="Nombre o contexto"
+                placeholder="Nombre o descripcion"
               />
             </label>
 
@@ -768,11 +1107,19 @@ export function AdminCampaignsPage() {
                     <TableHeadRow>
                       <TableHeaderCell className="w-8" />
                       <TableHeaderCell>Campaña</TableHeaderCell>
-                      <TableHeaderCell>Contexto</TableHeaderCell>
+                      <TableHeaderCell>Descripcion</TableHeaderCell>
                       <TableHeaderCell>Estado</TableHeaderCell>
                       <TableHeaderCell>Inicio</TableHeaderCell>
                       <TableHeaderCell>Fin</TableHeaderCell>
-                      <TableHeaderCell className="text-right">Prioridad</TableHeaderCell>
+                      <TableHeaderCell className="text-right">
+                        <span
+                          className="inline-flex items-center gap-1"
+                          title="Prioridad define desempate de promociones no acumulables en carrito. Menor numero = mayor prioridad."
+                        >
+                          Prioridad
+                          <CircleHelp className="h-3.5 w-3.5" />
+                        </span>
+                      </TableHeaderCell>
                       <TableHeaderCell className="text-right">Acciones</TableHeaderCell>
                     </TableHeadRow>
                   </thead>
@@ -812,7 +1159,11 @@ export function AdminCampaignsPage() {
                             </TableCell>
                             <TableCell>{campaign.startsAt}</TableCell>
                             <TableCell>{campaign.endsAt}</TableCell>
-                            <TableCell className="text-right font-semibold">{campaign.priority}</TableCell>
+                            <TableCell className="text-right">
+                              <span className="inline-flex min-w-10 items-center justify-center rounded-full border border-[var(--color-brand-200)] bg-[var(--color-brand-50)] px-2 py-0.5 text-xs font-semibold text-[var(--color-brand-700)]">
+                                P{campaign.priority}
+                              </span>
+                            </TableCell>
                             <TableCell>
                               <div className="flex justify-end gap-2">
                                 <Button
@@ -844,6 +1195,13 @@ export function AdminCampaignsPage() {
                 </Table>
               </TableContainer>
             )}
+
+            {filteredItems.length > 0 ? (
+              <p className="mt-3 text-xs text-[var(--color-ink-600)]">
+                Si un carrito contiene productos con promociones no acumulables, se aplica primero la campaña de
+                mayor prioridad operativa (P1 antes que P2, P2 antes que P3, etc.).
+              </p>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

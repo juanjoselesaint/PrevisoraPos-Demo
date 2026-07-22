@@ -10,6 +10,8 @@ interface ProductCardProps {
   campaignLabel: string
   offerType: string
   publicationBand: string
+  hasPromotion: boolean
+  savingsPercent: number
   imageUrl?: string
 }
 
@@ -20,6 +22,8 @@ export function ProductCard({
   campaignLabel,
   offerType,
   publicationBand,
+  hasPromotion,
+  savingsPercent,
   imageUrl,
 }: ProductCardProps) {
   return (
@@ -37,7 +41,7 @@ export function ProductCard({
       <div className="flex min-w-0 flex-1 flex-col">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-700)]">SKU {sku}</p>
-          <OfferBadge savingsPercent={publicationBand.toLowerCase().includes('promo') ? 20 : 0} />
+          <OfferBadge savingsPercent={savingsPercent} />
         </div>
 
         <h3 className="mt-2 text-base font-semibold leading-snug text-[var(--color-ink-900)]">{description}</h3>
@@ -49,13 +53,19 @@ export function ProductCard({
           </div>
           <div className="flex items-baseline gap-1.5">
             <dt className="font-medium text-[var(--color-ink-900)]">Campaña:</dt>
-            <dd className="text-[var(--color-ink-700)]">{campaignLabel}</dd>
+            <dd className="text-[var(--color-ink-700)]">
+              {hasPromotion ? campaignLabel : 'Precio regular (sin promocion)'}
+            </dd>
           </div>
         </dl>
 
         <div className="mt-auto flex flex-wrap items-center gap-2 pt-3">
-          <Badge variant="promo">{offerType}</Badge>
-          <span className="text-xs text-[var(--color-ink-600)]">{publicationBand}</span>
+          <Badge variant={hasPromotion ? 'promo' : 'neutral'}>
+            {hasPromotion ? offerType : 'Sin promocion activa'}
+          </Badge>
+          <span className="text-xs text-[var(--color-ink-600)]">
+            {hasPromotion ? publicationBand : 'Producto en esquema regular'}
+          </span>
         </div>
       </div>
     </article>

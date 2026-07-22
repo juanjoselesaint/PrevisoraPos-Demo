@@ -9,6 +9,7 @@ import type {
   QuoteSummary,
   StockSnapshot,
 } from '@core/domain/models'
+import { parseCardInstallmentCaps, stripPublicationBandMetadata } from '@core/domain/publication-band'
 
 interface EngineDataset {
   campaigns: Campaign[]
@@ -71,19 +72,42 @@ function applyCampaignPriority(details: ProductDetail[], campaignsById: Map<stri
 }
 
 function isEntityAllowedByRule(paymentFamily: string, entity: FinancialEntity): boolean {
-  if (paymentFamily === 'all') {
+  const configuredFamilies = paymentFamily
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean)
+
+  if (configuredFamilies.length === 0 || configuredFamilies.includes('all')) {
     return true
   }
 
-  if (paymentFamily === 'credit_card') {
-    return entity.family === 'credit_card'
-  }
-
-  if (paymentFamily === 'none') {
+  if (configuredFamilies.includes('none')) {
     return false
   }
 
-  return entity.id === paymentFamily
+  if (configuredFamilies.includes(entity.id)) {
+    return true
+  }
+
+  return configuredFamilies.some((family) => {
+    if (family === 'credit_card') {
+      return entity.family === 'credit_card'
+    }
+
+    if (family === 'debit_card') {
+      return entity.family === 'debit_card'
+    }
+
+    if (family === 'bank_transfer') {
+      return entity.family === 'bank_transfer'
+    }
+
+    if (family === 'cash') {
+      return entity.family === 'cash'
+    }
+
+    return false
+  })
 }
 
 function applyOperationalExclusions(rows: FinancialRow[], stExpression: string): FinancialRow[] {
@@ -105,7 +129,8 @@ function applyOperationalExclusions(rows: FinancialRow[], stExpression: string):
 }
 
 function getCampaignInstallmentCap(publicationBand: string): number | undefined {
-  const match = publicationBand.match(/(\d{1,2})/)
+  const cleanBand = stripPublicationBandMetadata(publicationBand)
+  const match = cleanBand.match(/(\d{1,2})/)
   if (!match) {
     return undefined
   }
@@ -169,9 +194,16 @@ function buildFinancialRows(
       }
     }
 
-    const maxInstallments = campaignInstallmentCap
-      ? Math.min(matchedRule.maxInstallments, campaignInstallmentCap)
-      : matchedRule.maxInstallments
+    const cardInstallmentCaps = parseCardInstallmentCaps(detail.rule.publicationBand)
+    const specificCardCap = cardInstallmentCaps[entity.id]
+
+    let maxInstallments = matchedRule.maxInstallments
+    if (campaignInstallmentCap) {
+      maxInstallments = Math.min(maxInstallments, campaignInstallmentCap)
+    }
+    if (specificCardCap) {
+      maxInstallments = Math.min(maxInstallments, specificCardCap)
+    }
 
     const estimatedInstallmentAmount =
       maxInstallments > 0 ? roundMoney(installmentBaseAmount / maxInstallments) : 0
@@ -227,10 +259,23 @@ export function resolveRuleForCommercialContext(
       return false
     }
 
-    if (
-      candidate.rule.condition.customerSegment !== input.customerSegment &&
-      candidate.rule.condition.customerSegment !== 'external'
-    ) {
+    if (candidate.rule.condition.customerSegment !== 'all') {
+      const configuredSegments = candidate.rule.condition.customerSegment
+        .split(',')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+
+      const matchesSegment = configuredSegments.includes(input.customerSegment)
+      const allowsExternalFallback =
+        configuredSegments.includes('external') && input.customerSegment === 'affiliate'
+
+      if (!matchesSegment && !allowsExternalFallback) {
+        excludedReasons.push(`${candidate.rule.id}: segmento de cliente no aplicable`)
+        return false
+      }
+    }
+
+    if (!candidate.rule.condition.customerSegment) {
       excludedReasons.push(`${candidate.rule.id}: segmento de cliente no aplicable`)
       return false
     }
@@ -320,7 +365,7 @@ export function buildCommercialQuoteSheet(
     brand: selected.product.brand,
     campaignLabel: campaign.name,
     offerType: selected.rule.offerType,
-    publicationBand: selected.rule.publicationBand,
+    publicationBand: stripPublicationBandMetadata(selected.rule.publicationBand),
     validFrom: selected.product.validFrom,
     validTo: selected.product.validTo,
     basePrice: selected.product.basePrice,

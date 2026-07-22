@@ -27,12 +27,13 @@ export function runCommercialEngineControlledValidation(): CommercialEngineValid
   return domainData.scenarioFixtures
     .filter((scenario) => scenario.requiredByStep3 && scenario.sku)
     .map((scenario) => {
+      const scenarioSegment = domainData.productDetailsBySku[scenario.sku as string]?.rule.condition.customerSegment
+      const customerSegment = scenarioSegment === 'affiliate' ? 'affiliate' : 'external'
+
       const input = {
         sku: scenario.sku as string,
         branchId: 'casa-central',
-        customerSegment:
-          domainData.productDetailsBySku[scenario.sku as string]?.rule.condition.customerSegment ??
-          'external',
+        customerSegment,
         negotiationDiscountPercent:
           scenario.id === 'scenario-8-negotiation-enabled' ||
           scenario.id === 'scenario-9-negotiation-blocked'

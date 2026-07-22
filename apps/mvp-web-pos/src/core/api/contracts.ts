@@ -142,7 +142,7 @@ export interface CampaignRuleSummary {
   productDescription: string
   offerType: string
   publicationBand: string
-  customerSegment: CustomerSegment
+  customerSegment: CustomerSegment | 'all'
   paymentFamily: string
   cashDiscountPercent: number
   affiliateExtraDiscountPercent: number
@@ -161,7 +161,7 @@ export interface UpsertCampaignRuleRequest {
   sku: string
   offerType: string
   publicationBand: string
-  customerSegment: CustomerSegment
+  customerSegment: CustomerSegment | 'all'
   paymentFamily: string
   cashDiscountPercent: number
   affiliateExtraDiscountPercent: number

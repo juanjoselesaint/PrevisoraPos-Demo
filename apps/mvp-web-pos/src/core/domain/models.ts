@@ -69,7 +69,7 @@ export interface Campaign {
 }
 
 export interface RuleCondition {
-  customerSegment: CustomerSegment
+  customerSegment: CustomerSegment | 'all'
   paymentFamily: string
   appliesOfferPrice: boolean
   appliesPequeRate: boolean

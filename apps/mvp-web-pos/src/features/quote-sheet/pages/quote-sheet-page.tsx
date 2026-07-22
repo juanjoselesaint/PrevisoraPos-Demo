@@ -190,8 +190,20 @@ export function QuoteSheetPage() {
   })
 
   useEffect(() => {
-    const firstApplicableEntity = data?.sheet.financialRows.find((row) => row.maxInstallments > 0)
-    const fallbackEntity = data?.sheet.financialRows[0]
+    const sheet = data?.sheet
+    const hasCreditCardOptions =
+      sheet?.financialRows.some(
+        (row) => row.paymentFamily === 'credit_card' && row.maxInstallments > 0,
+      ) ?? false
+
+    if (sheet && !hasCreditCardOptions) {
+      setSelectedPaymentEntityId(CONTADO_ENTITY_ID)
+      setSelectedInstallments(1)
+      return
+    }
+
+    const firstApplicableEntity = sheet?.financialRows.find((row) => row.maxInstallments > 0)
+    const fallbackEntity = sheet?.financialRows[0]
     const defaultEntityId = firstApplicableEntity?.entityId ?? fallbackEntity?.entityId
 
     if (!defaultEntityId) {
@@ -201,7 +213,7 @@ export function QuoteSheetPage() {
     }
 
     setSelectedPaymentEntityId((current) => current || defaultEntityId)
-  }, [data?.sheet.financialRows])
+  }, [data?.sheet])
 
   useEffect(() => {
     if (!data?.sheet || !selectedPaymentEntityId) {
@@ -335,6 +347,14 @@ export function QuoteSheetPage() {
   const selectedEntityRow = data?.sheet.financialRows.find(
     (row) => row.entityId === selectedPaymentEntityId,
   )
+  const hasPromotion = (data?.sheet.offerPrice ?? 0) < (data?.sheet.basePrice ?? 0)
+  const computedSavingsPercent = hasPromotion && data?.sheet.basePrice
+    ? ((data.sheet.basePrice - data.sheet.offerPrice) / data.sheet.basePrice) * 100
+    : 0
+  const hasCreditCardOptions =
+    data?.sheet.financialRows.some(
+      (row) => row.paymentFamily === 'credit_card' && row.maxInstallments > 0,
+    ) ?? false
   const maxInstallmentsForSelected = selectedEntityRow?.maxInstallments ?? 1
   const cuotaOptions = Array.from({ length: maxInstallmentsForSelected }, (_, index) => index + 1)
 
@@ -387,6 +407,8 @@ export function QuoteSheetPage() {
                 campaignLabel={data.sheet.campaignLabel}
                 offerType={data.sheet.offerType}
                 publicationBand={data.sheet.publicationBand}
+                hasPromotion={hasPromotion}
+                savingsPercent={computedSavingsPercent}
                 imageUrl={selectedProductImageUrl}
               />
 
@@ -398,9 +420,10 @@ export function QuoteSheetPage() {
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                 <PriceBlock
-                  externalPrice={data.sheet.offerPrice}
+                  basePrice={data.sheet.basePrice}
                   offerPrice={data.sheet.offerPrice}
                   affiliatePrice={data.sheet.affiliatePrice}
+                  hasPromotion={hasPromotion}
                 />
               </div>
 
@@ -414,7 +437,7 @@ export function QuoteSheetPage() {
                 />
               ) : null}
 
-              {isFieldVisible(role, 'financialRows.maxInstallments') ? (
+              {isFieldVisible(role, 'financialRows.maxInstallments') && hasCreditCardOptions ? (
                 <Card>
                   <CardHeader>
                     <div>

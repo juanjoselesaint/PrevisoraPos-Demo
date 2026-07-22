@@ -157,7 +157,7 @@ export const handlers = [
       sku: string
       offerType: string
       publicationBand: string
-      customerSegment: 'external' | 'affiliate'
+      customerSegment: 'external' | 'affiliate' | 'all'
       paymentFamily: string
       cashDiscountPercent: number
       affiliateExtraDiscountPercent: number
