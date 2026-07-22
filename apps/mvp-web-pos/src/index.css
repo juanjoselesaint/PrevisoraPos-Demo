@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-ui: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+  --font-display: 'Bahnschrift', 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+
+  /* Brand: deep institutional blue — seguros/fintech, no generico */
+  --color-brand-900: #0a1f38;
+  --color-brand-800: #0e2c4d;
+  --color-brand-700: #123a63;
+  --color-brand-600: #1a4d80;
+  --color-brand-500: #2b6ba3;
+  --color-brand-400: #4f8dc2;
+  --color-brand-300: #8ab4da;
+  --color-brand-100: #dfeaf6;
+  --color-brand-50: #f2f7fc;
+
+  /* Accent: calido, para promos/ofertas/CTAs destacados */
+  --color-accent-700: #93590f;
+  --color-accent-600: #b9781a;
+  --color-accent-500: #d99a2b;
+  --color-accent-400: #e8b458;
+  --color-accent-100: #fbead0;
+  --color-accent-50: #fdf5e8;
+
+  /* Neutros / texto */
+  --color-ink-900: #12182b;
+  --color-ink-800: #1c2438;
+  --color-ink-700: #313c56;
+  --color-ink-600: #4b5573;
+  --color-ink-500: #6b7591;
+  --color-ink-400: #8d96ad;
+
+  /* Superficies */
+  --color-surface-0: #ffffff;
+  --color-surface-50: #f7f9fc;
+  --color-surface-100: #eef2f8;
+  --color-surface-200: #e1e7f0;
+  --color-surface-300: #c9d3e2;
+  --color-surface-400: #a9b6cc;
+
+  /* Semanticos: escalas completas 50/100/300/500/600/700/800 */
+  --color-success-50: #eefaf2;
+  --color-success-100: #def4e7;
+  --color-success-300: #9adfba;
+  --color-success-500: #2ea364;
+  --color-success-600: #1f8a4c;
+  --color-success-700: #1a7440;
+  --color-success-800: #145c33;
+
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fff2cf;
+  --color-warning-300: #f7d67f;
+  --color-warning-500: #c48b0f;
+  --color-warning-600: #a4750a;
+  --color-warning-700: #8a6108;
+  --color-warning-800: #6e4d06;
+
+  --color-danger-50: #fdeded;
+  --color-danger-100: #fbe1e1;
+  --color-danger-300: #ec9d9d;
+  --color-danger-500: #cc4b4b;
+  --color-danger-600: #b53939;
+  --color-danger-700: #952d2d;
+  --color-danger-800: #772323;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-ui);
+  color: var(--color-ink-900);
+  background:
+    radial-gradient(circle at 10% 10%, rgba(26, 77, 128, 0.12), transparent 35%),
+    linear-gradient(160deg, #f8fafc, #eef2f8 50%, #f4f7fb);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.font-display {
+  font-family: var(--font-display);
+}
+
+@media print {
+  body {
+    background: #fff;
+  }
+
+  .no-print {
+    display: none !important;
+  }
+
+  .print-surface {
+    border: 1px solid #d1d5db;
+    box-shadow: none;
+  }
+}

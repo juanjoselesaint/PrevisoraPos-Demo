@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pandoc -t markdown \"Previsora del Parana - Reemplazo Excel Promociones.docx\")",
+      "Bash(markitdown \"Modernización del Punto de Venta de Promociones.pptx\")",
+      "Bash(markitdown \"Catalogo Ofertas 2026 06 - para desarrolladores.xlsx\")",
+      "Bash(python3 -c \"import markitdown; print\\('markitdown ok'\\)\")",
+      "Bash(python3 -c \"import docx; print\\('docx ok'\\)\")"
+    ]
+  }
+}
