@@ -1,5 +1,5 @@
 import type { CommercialQuoteSheet } from '@core/domain/models'
-import type { QuoteDraft } from '@core/stores/quote-draft-store'
+import type { QuoteDraft, QuoteDraftLine } from '@core/stores/quote-draft-store'
 
 export interface SoftlandQuotePayload {
   quoteId: string
@@ -35,6 +35,60 @@ export function normalizeNegotiationPercent(rawValue: number): number {
   return Math.min(0.15, Math.max(0.05, rawValue))
 }
 
+export function buildQuoteDraftLineFromSheet(input: {
+  sheet: CommercialQuoteSheet
+  quantity: number
+  negotiationPercent?: number
+  negotiationEnabled: boolean
+}): QuoteDraftLine {
+  const normalizedQuantity = Math.max(1, Math.floor(input.quantity))
+  const discount = input.negotiationEnabled && input.negotiationPercent !== undefined
+    ? normalizeNegotiationPercent(input.negotiationPercent)
+    : 0
+
+  const unitPrice = roundMoney(input.sheet.offerPrice * (1 - discount))
+  const subtotal = roundMoney(unitPrice * normalizedQuantity)
+
+  return {
+    sku: input.sheet.sku,
+    description: input.sheet.description,
+    quantity: normalizedQuantity,
+    unitPrice,
+    appliedDiscountPercent: discount,
+    subtotal,
+    hasPromotion: input.sheet.offerPrice < input.sheet.basePrice,
+    campaignLabel: input.sheet.campaignLabel,
+  }
+}
+
+export function mergeQuoteLineBySku(quote: QuoteDraft, incomingLine: QuoteDraftLine): QuoteDraft {
+  const existingLine = quote.lines.find((line) => line.sku === incomingLine.sku)
+
+  if (!existingLine) {
+    return {
+      ...quote,
+      lines: [...quote.lines, incomingLine],
+    }
+  }
+
+  const nextQuantity = existingLine.quantity + incomingLine.quantity
+  const nextUnitPrice = incomingLine.unitPrice
+  const nextDiscount = incomingLine.appliedDiscountPercent
+
+  const updatedLine: QuoteDraftLine = {
+    ...existingLine,
+    quantity: nextQuantity,
+    unitPrice: nextUnitPrice,
+    appliedDiscountPercent: nextDiscount,
+    subtotal: roundMoney(nextQuantity * nextUnitPrice),
+  }
+
+  return {
+    ...quote,
+    lines: quote.lines.map((line) => (line.sku === incomingLine.sku ? updatedLine : line)),
+  }
+}
+
 export function buildQuoteDraftFromSheet(input: {
   quoteId: string
   sheet: CommercialQuoteSheet
@@ -45,13 +99,12 @@ export function buildQuoteDraftFromSheet(input: {
   negotiationReason?: string
   negotiationEnabled: boolean
 }): QuoteDraft {
-  const normalizedQuantity = Math.max(1, Math.floor(input.quantity))
-  const discount = input.negotiationEnabled && input.negotiationPercent !== undefined
-    ? normalizeNegotiationPercent(input.negotiationPercent)
-    : 0
-
-  const unitPrice = roundMoney(input.sheet.offerPrice * (1 - discount))
-  const subtotal = roundMoney(unitPrice * normalizedQuantity)
+  const line = buildQuoteDraftLineFromSheet({
+    sheet: input.sheet,
+    quantity: input.quantity,
+    negotiationPercent: input.negotiationPercent,
+    negotiationEnabled: input.negotiationEnabled,
+  })
 
   return {
     id: input.quoteId,
@@ -61,16 +114,7 @@ export function buildQuoteDraftFromSheet(input: {
     paymentInstallments: Math.max(1, Math.floor(input.paymentInstallments)),
     status: 'open',
     reason: input.negotiationReason,
-    lines: [
-      {
-        sku: input.sheet.sku,
-        description: input.sheet.description,
-        quantity: normalizedQuantity,
-        unitPrice,
-        appliedDiscountPercent: discount,
-        subtotal,
-      },
-    ],
+    lines: [line],
   }
 }
 

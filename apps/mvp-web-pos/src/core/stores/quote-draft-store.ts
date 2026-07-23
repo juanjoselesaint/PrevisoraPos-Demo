@@ -10,6 +10,8 @@ export interface QuoteDraftLine {
   unitPrice: number
   appliedDiscountPercent: number
   subtotal: number
+  hasPromotion?: boolean
+  campaignLabel?: string
 }
 
 export interface QuoteDraft {

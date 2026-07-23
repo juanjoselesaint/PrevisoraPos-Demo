@@ -15,6 +15,7 @@ import { LoginPage } from '@features/auth/pages/login-page'
 import { CatalogPage } from '@features/catalog/pages/catalog-page'
 import { AdminDashboardPage } from '@features/dashboard/pages/admin-dashboard-page'
 import { SellerDashboardPage } from '@features/dashboard/pages/seller-dashboard-page'
+import { QuoteCartPage } from '@features/quote-sheet/pages/quote-cart-page'
 import { QuoteSheetPage } from '@features/quote-sheet/pages/quote-sheet-page'
 import { StockPage } from '@features/stock/pages/stock-page'
 
@@ -62,6 +63,13 @@ const router = createBrowserRouter([
                 element: <QuoteSheetPage />,
                 handle: {
                   breadcrumb: 'Ficha y cotizacion',
+                },
+              },
+              {
+                path: 'quote-cart',
+                element: <QuoteCartPage />,
+                handle: {
+                  breadcrumb: 'Carrito de cotizacion',
                 },
               },
               {

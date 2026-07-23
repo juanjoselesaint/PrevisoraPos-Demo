@@ -12,10 +12,18 @@ interface NavItem {
   icon?: ComponentType<{ className?: string }>
 }
 
+interface HeaderAction {
+  to: string
+  label: string
+  icon?: ComponentType<{ className?: string }>
+  badgeCount?: number
+}
+
 interface ShellLayoutProps {
   title: string
   navItems: NavItem[]
   headerBadge: string
+  headerActions?: HeaderAction[]
   children?: ReactNode
 }
 
@@ -41,7 +49,7 @@ function BreadcrumbTrail() {
   )
 }
 
-export function ShellLayout({ title, navItems, headerBadge, children }: ShellLayoutProps) {
+export function ShellLayout({ title, navItems, headerBadge, headerActions = [], children }: ShellLayoutProps) {
   const role = useSessionStore((state) => state.role)
   const logout = useSessionStore((state) => state.logout)
 
@@ -71,6 +79,34 @@ export function ShellLayout({ title, navItems, headerBadge, children }: ShellLay
           </div>
 
           <div className="flex items-center gap-3">
+            {headerActions.map((action) => {
+              const Icon = action.icon
+              const badgeCount = action.badgeCount ?? 0
+
+              return (
+                <NavLink
+                  key={action.to}
+                  to={action.to}
+                  className={({ isActive }) =>
+                    [
+                      'relative inline-flex h-10 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition',
+                      isActive
+                        ? 'border-[var(--color-brand-300)] bg-[var(--color-brand-50)] text-[var(--color-brand-700)]'
+                        : 'border-[var(--color-surface-300)] bg-white text-[var(--color-ink-700)] hover:bg-[var(--color-surface-100)]',
+                    ].join(' ')
+                  }
+                >
+                  {Icon ? <Icon className="h-4 w-4" /> : null}
+                  <span className="hidden sm:inline">{action.label}</span>
+                  {badgeCount > 0 ? (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--color-brand-700)] px-1 text-[10px] font-semibold text-white">
+                      {badgeCount > 99 ? '99+' : badgeCount}
+                    </span>
+                  ) : null}
+                </NavLink>
+              )
+            })}
+
             <div className="hidden items-center gap-2 rounded-full bg-[var(--color-surface-100)] py-1 pl-1 pr-3 sm:flex">
               <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-brand-100)] text-xs font-semibold text-[var(--color-brand-700)]">
                 {initials}

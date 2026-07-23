@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 
 import { sendQuoteToSoftland } from '@core/api/fake-api'
 import type { UserRole } from '@core/domain/models'
@@ -27,9 +27,10 @@ import { useCatalogProducts } from '@features/catalog/api/use-catalog-products'
 import { useCommercialQuoteSheet } from '@features/quote-sheet/api/use-commercial-quote-sheet'
 import {
   buildQuoteDraftFromSheet,
+  buildQuoteDraftLineFromSheet,
   buildSoftlandQuotePayload,
+  mergeQuoteLineBySku,
   normalizeNegotiationPercent,
-  type SoftlandQuotePayload,
 } from '@features/quote-sheet/lib/quote-builder'
 
 const CONTADO_ENTITY_ID = 'contado'
@@ -91,8 +92,6 @@ export function QuoteSheetPage() {
   const [appliedNegotiationPercent, setAppliedNegotiationPercent] = useState<number | undefined>()
   const [quoteQuantity, setQuoteQuantity] = useState(1)
   const [selectedInstallments, setSelectedInstallments] = useState(1)
-  const [softlandPayloadText, setSoftlandPayloadText] = useState('')
-  const [softlandPayload, setSoftlandPayload] = useState<SoftlandQuotePayload | null>(null)
   const [isSendingToSoftland, setIsSendingToSoftland] = useState(false)
   const [sendResultMessage, setSendResultMessage] = useState<string | null>(null)
 
@@ -212,7 +211,14 @@ export function QuoteSheetPage() {
       return
     }
 
-    setSelectedPaymentEntityId((current) => current || defaultEntityId)
+    setSelectedPaymentEntityId((current) => {
+      if (!current) {
+        return defaultEntityId
+      }
+
+      const isCurrentEntityAvailable = sheet?.financialRows.some((row) => row.entityId === current)
+      return isCurrentEntityAvailable ? current : defaultEntityId
+    })
   }, [data?.sheet])
 
   useEffect(() => {
@@ -277,11 +283,18 @@ export function QuoteSheetPage() {
       return
     }
 
-    const quoteId = `quote-runtime-${Date.now()}`
-    const draft = buildQuoteDraftFromSheet({
-      quoteId,
+    const line = buildQuoteDraftLineFromSheet({
       sheet: data.sheet,
       quantity: quoteQuantity,
+      negotiationPercent: appliedNegotiationPercent,
+      negotiationEnabled: canApplyNegotiationByRole,
+    })
+
+    const quoteId = openQuote?.id ?? `quote-runtime-${Date.now()}`
+    const baseDraft = buildQuoteDraftFromSheet({
+      quoteId,
+      sheet: data.sheet,
+      quantity: 1,
       paymentEntityId: selectedPaymentEntityId,
       paymentInstallments: selectedInstallments,
       negotiationPercent: appliedNegotiationPercent,
@@ -289,10 +302,26 @@ export function QuoteSheetPage() {
       negotiationEnabled: canApplyNegotiationByRole,
     })
 
-    saveOpenQuote(draft)
-    const payload = buildSoftlandQuotePayload(draft)
-    setSoftlandPayload(payload)
-    setSoftlandPayloadText(JSON.stringify(payload, null, 2))
+    const isCompatibleWithOpenQuote =
+      openQuote &&
+      openQuote.branchId === baseDraft.branchId &&
+      openQuote.customerSegment === baseDraft.customerSegment
+
+    const draftBase = isCompatibleWithOpenQuote && openQuote
+      ? {
+        ...openQuote,
+        paymentEntityId: selectedPaymentEntityId,
+        paymentInstallments: selectedInstallments,
+        reason: negotiationReason || openQuote.reason,
+      }
+      : {
+        ...baseDraft,
+        lines: [],
+      }
+
+    const nextDraft = mergeQuoteLineBySku(draftBase, line)
+
+    saveOpenQuote(nextDraft)
     setSendResultMessage(null)
 
     registerAuditEvent({
@@ -300,8 +329,8 @@ export function QuoteSheetPage() {
       actorUserId: userId,
       actorRole: role,
       entityType: 'quote',
-      entityId: draft.id,
-      summary: `Cotizacion creada para ${draft.lines[0].sku} con ${draft.paymentInstallments} cuotas`,
+      entityId: nextDraft.id,
+      summary: `Cotizacion actualizada con SKU ${line.sku} (${line.quantity} u.)`,
     })
   }
 
@@ -320,13 +349,26 @@ export function QuoteSheetPage() {
     })
 
     closeOpenQuote()
-    setSoftlandPayload(null)
-    setSoftlandPayloadText('')
     setSendResultMessage(null)
   }
 
-  async function handleSendToSoftland() {
-    if (!softlandPayload || isSendingToSoftland) {
+  async function handleSendCurrentSheet() {
+    if (!data?.sheet || !selectedPaymentEntityId) {
+      return
+    }
+
+    const transientQuote = buildQuoteDraftFromSheet({
+      quoteId: `quote-single-${Date.now()}`,
+      sheet: data.sheet,
+      quantity: quoteQuantity,
+      paymentEntityId: selectedPaymentEntityId,
+      paymentInstallments: selectedInstallments,
+      negotiationPercent: appliedNegotiationPercent,
+      negotiationReason,
+      negotiationEnabled: canApplyNegotiationByRole,
+    })
+
+    if (isSendingToSoftland) {
       return
     }
 
@@ -334,7 +376,9 @@ export function QuoteSheetPage() {
     setSendResultMessage(null)
 
     try {
-      const response = await sendQuoteToSoftland({ payload: softlandPayload })
+      const response = await sendQuoteToSoftland({
+        payload: buildSoftlandQuotePayload(transientQuote),
+      })
       setSendResultMessage(`Enviado a Softland. Referencia: ${response.referenceId}`)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error desconocido de envio'
@@ -542,7 +586,7 @@ export function QuoteSheetPage() {
                   <div>
                     <CardTitle>Resumen de cotizacion</CardTitle>
                     <CardDescription>
-                      Alta de linea desde ficha y envio del resumen a Softland.
+                      Define condiciones del producto actual y sumalo al carrito operativo.
                     </CardDescription>
                   </div>
                 </CardHeader>
@@ -596,59 +640,48 @@ export function QuoteSheetPage() {
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2">
-                    {!openQuote ? (
-                      <Button className="flex-1" onClick={handleBuildQuote}>
-                        Crear cotizacion
-                      </Button>
-                    ) : null}
+                    <Button className="flex-1" onClick={handleBuildQuote}>
+                      {openQuote ? 'Agregar al carrito' : 'Crear carrito y agregar'}
+                    </Button>
                     <Button
                       variant="secondary"
                       className="flex-1"
-                      onClick={handleSendToSoftland}
-                      disabled={!softlandPayload || isSendingToSoftland}
+                      onClick={handleSendCurrentSheet}
+                      disabled={!data?.sheet || isSendingToSoftland}
                     >
-                      {isSendingToSoftland ? 'Enviando...' : 'Enviar a Softland'}
+                      {isSendingToSoftland ? 'Enviando...' : 'Enviar solo esta ficha'}
                     </Button>
                   </div>
-                  {openQuote ? (
-                    <Button variant="ghost" className="w-full" onClick={handleCloseQuote}>
-                      Cerrar cotizacion abierta
-                    </Button>
-                  ) : null}
 
                   {sendResultMessage ? (
                     <p className="text-sm text-[var(--color-ink-700)]">{sendResultMessage}</p>
                   ) : null}
 
                   {openQuote ? (
-                    <div className="space-y-1.5 rounded-lg border border-[var(--color-brand-100)] bg-[var(--color-brand-50)] p-3 text-sm text-[var(--color-ink-700)]">
-                      <p className="flex items-center justify-between">
+                    <div className="space-y-3 rounded-lg border border-[var(--color-brand-100)] bg-[var(--color-brand-50)] p-3 text-sm text-[var(--color-ink-700)]">
+                      <div className="flex items-center justify-between gap-2">
                         <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-brand-700)]">
-                          Cotizacion abierta
+                          Carrito activo
                         </span>
                         <span className="font-mono text-xs text-[var(--color-ink-600)]">{openQuote.id}</span>
-                      </p>
+                      </div>
                       <p>
-                        SKU {openQuote.lines[0].sku} - {openQuote.lines[0].description}
-                      </p>
-                      <p className="text-base font-semibold text-[var(--color-ink-900)]">
-                        {formatCurrency(openQuote.lines[0].subtotal)}
+                        {openQuote.lines.length} productos | Total estimado {formatCurrency(openQuote.lines.reduce((acc, line) => acc + line.subtotal, 0))}
                       </p>
                       <p className="text-xs text-[var(--color-ink-600)]">
                         Medio: {openQuote.paymentEntityId} | Cuotas: {openQuote.paymentInstallments}
                       </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Link to="/seller/quote-cart" className="flex-1">
+                          <Button variant="secondary" className="w-full">
+                            Ver carrito
+                          </Button>
+                        </Link>
+                        <Button variant="ghost" className="flex-1" onClick={handleCloseQuote}>
+                          Vaciar carrito
+                        </Button>
+                      </div>
                     </div>
-                  ) : null}
-
-                  {softlandPayloadText ? (
-                    <details className="group rounded-lg border border-[var(--color-surface-300)]">
-                      <summary className="cursor-pointer list-none px-3 py-2 text-xs font-semibold uppercase tracking-wide text-[var(--color-ink-600)] group-open:border-b group-open:border-[var(--color-surface-300)]">
-                        Ver payload tecnico Softland
-                      </summary>
-                      <pre className="max-h-64 overflow-auto rounded-b-lg bg-[var(--color-surface-50)] p-3 font-mono text-xs leading-6 text-[var(--color-ink-900)]">
-                        {softlandPayloadText}
-                      </pre>
-                    </details>
                   ) : null}
                 </CardContent>
               </Card>

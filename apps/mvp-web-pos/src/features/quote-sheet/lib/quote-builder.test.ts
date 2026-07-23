@@ -4,6 +4,8 @@ import { domainData } from '@mocks/data/domain'
 import {
   buildQuoteDraftFromSheet,
   buildSoftlandQuotePayload,
+  mergeQuoteLineBySku,
+  buildQuoteDraftLineFromSheet,
   normalizeNegotiationPercent,
 } from '@features/quote-sheet/lib/quote-builder'
 
@@ -48,5 +50,29 @@ describe('quote builder', () => {
     expect(payload.quoteId).toBe('quote-softland')
     expect(payload.items[0].sku).toBe(sheet.sku)
     expect(payload.totals.totalAfterDiscount).toBe(quote.lines[0].subtotal)
+  })
+
+  it('acumula cantidades cuando se agrega el mismo SKU al carrito', () => {
+    const sheet = domainData.commercialQuoteSheetsBySku['1004700']
+    const quote = buildQuoteDraftFromSheet({
+      quoteId: 'quote-cart',
+      sheet,
+      quantity: 1,
+      paymentEntityId: 'bbva',
+      paymentInstallments: 6,
+      negotiationEnabled: false,
+    })
+
+    const incomingLine = buildQuoteDraftLineFromSheet({
+      sheet,
+      quantity: 2,
+      negotiationEnabled: false,
+    })
+
+    const merged = mergeQuoteLineBySku(quote, incomingLine)
+
+    expect(merged.lines).toHaveLength(1)
+    expect(merged.lines[0].quantity).toBe(3)
+    expect(merged.lines[0].subtotal).toBe(merged.lines[0].unitPrice * 3)
   })
 })
